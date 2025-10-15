@@ -1,23 +1,5 @@
-"""
-GiftsRun clone - Telegram bot (example)
----
-Instructions:
-1) Replace BOT_TOKEN and ADMIN_ID with your values.
-2) Install dependencies: pip install pyTelegramBotAPI
-3) Run: python giftsrun_clone_bot.py
-
-This is a template implementing:
-- /start with optional referral (t.me/yourbot?start=<ref_id>)
-- SQLite storage for users and referrals
-- simple gift-claim flow with cooldown
-- admin commands: /stats, /broadcast, /addgift, /setcooldown
-- inline keyboards
-- basic error handling and logging
-
-Use and adapt freely. Do NOT impersonate real services. This template is educational.
-"""
-
 import os
+from dotenv import load_dotenv
 import time
 import sqlite3
 import logging
@@ -27,15 +9,17 @@ from typing import Optional
 import telebot
 from telebot import types
 
-import os
-BOT_TOKEN = os.getenv("7268301814:AAEx-jYb_9_Npi2KNL5kJLR9OvqMBWmQOz0")
-ADMIN_ID = int(os.getenv("8409202502", "0"))
+# -------------------- CONFIG --------------------
+load_dotenv()                     # Завантажує змінні середовища з .env
+BOT_TOKEN = os.getenv("7268301814:AAEx-jYb_9_Npi2KNL5kJLR9OvqMBWmQOz0")      # <- Встав свій токен у файл .env
+ADMIN_ID = int(os.getenv("8409202502", "0"))  # <- Встав свій Telegram ID у файл .env
+DB_PATH = "giftsrun_clone.db"
+CLAIM_COOLDOWN_HOURS = 24
 
 # -------------------- SETUP --------------------
 logging.basicConfig(level=logging.INFO)
 bot = telebot.TeleBot(BOT_TOKEN, parse_mode="HTML")
 
-# Ensure DB exists
 conn = sqlite3.connect(DB_PATH, check_same_thread=False)
 cur = conn.cursor()
 
@@ -49,7 +33,6 @@ def init_db():
         last_name TEXT,
         created_at TEXT
     )""")
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS referrals (
         id INTEGER PRIMARY KEY,
@@ -57,7 +40,6 @@ def init_db():
         referred_tg_id INTEGER,
         created_at TEXT
     )""")
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS gifts (
         id INTEGER PRIMARY KEY,
@@ -65,7 +47,6 @@ def init_db():
         data TEXT,
         active INTEGER DEFAULT 1
     )""")
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS claims (
         id INTEGER PRIMARY KEY,
@@ -73,7 +54,6 @@ def init_db():
         gift_id INTEGER,
         claimed_at TEXT
     )""")
-
     conn.commit()
 
 init_db()
@@ -95,7 +75,6 @@ def add_user(tg_user) -> None:
 def add_referral(referrer_id: int, referred_id: int) -> None:
     now = datetime.utcnow().isoformat()
     try:
-        # avoid duplicate referral
         cur.execute(
             "SELECT 1 FROM referrals WHERE referrer_tg_id=? AND referred_tg_id=?",
             (referrer_id, referred_id),
@@ -138,8 +117,6 @@ def get_active_gift() -> Optional[dict]:
 @bot.message_handler(commands=["start"])
 def start_handler(message: types.Message):
     add_user(message.from_user)
-
-    # handle referral: /start <referrer_tg_id>
     args = message.text.split()
     if len(args) > 1:
         ref = args[1]
@@ -164,7 +141,6 @@ def start_handler(message: types.Message):
     )
     bot.send_message(message.chat.id, text, reply_markup=kb)
 
-
 @bot.callback_query_handler(func=lambda c: True)
 def callback_query(c: types.CallbackQuery):
     try:
@@ -175,12 +151,10 @@ def callback_query(c: types.CallbackQuery):
             bot.answer_callback_query(c.id, "Реф посилання скопійовано в повідомлення")
             bot.send_message(c.from_user.id, f"Твоє реф посилання:\n{link}")
             return
-
         if data == "help":
             bot.answer_callback_query(c.id)
             bot.send_message(c.from_user.id, "Команди: /start, /help. Адмін: /stats, /broadcast <text>")
             return
-
         if data.startswith("claim:"):
             _, gift_id_s = data.split(":", 1)
             try:
@@ -188,25 +162,19 @@ def callback_query(c: types.CallbackQuery):
             except ValueError:
                 bot.answer_callback_query(c.id, "Невірний подарунок")
                 return
-
             if not can_claim(c.from_user.id):
                 bot.answer_callback_query(c.id, "Ви вже забирали подарунок. Спробуйте пізніше.")
                 return
-
-            # get gift info
             cur.execute("SELECT title, data FROM gifts WHERE id=? AND active=1", (gift_id,))
             row = cur.fetchone()
             if not row:
                 bot.answer_callback_query(c.id, "Подарунок не знайдено")
                 return
-
             title, data = row
-            # send gift — here we just send text; adapt to real gift logic
             bot.send_message(c.from_user.id, f"Ви отримали: <b>{title}</b>\n{data}")
             record_claim(c.from_user.id, gift_id)
             bot.answer_callback_query(c.id, "Подарунок надіслано!")
             return
-
         bot.answer_callback_query(c.id)
     except Exception as e:
         logging.exception("callback error: %s", e)
@@ -214,7 +182,6 @@ def callback_query(c: types.CallbackQuery):
             bot.answer_callback_query(c.id, "Сталася помилка")
         except Exception:
             pass
-
 
 # -------------------- ADMIN COMMANDS --------------------
 
@@ -226,7 +193,6 @@ def admin_only(func):
         return func(message)
     return wrapper
 
-
 @bot.message_handler(commands=["stats"])
 @admin_only
 def stats_command(message: types.Message):
@@ -236,10 +202,8 @@ def stats_command(message: types.Message):
     refs_count = cur.fetchone()[0]
     cur.execute("SELECT COUNT(*) FROM claims")
     claims_count = cur.fetchone()[0]
-
     text = f"Користувачів: {users_count}\nРефералів: {refs_count}\nВидач подарунків: {claims_count}"
     bot.reply_to(message, text)
-
 
 @bot.message_handler(commands=["broadcast"])
 @admin_only
@@ -261,11 +225,9 @@ def broadcast_command(message: types.Message):
             pass
     bot.reply_to(message, f"Розіслано повідомлень: {sent}")
 
-
 @bot.message_handler(commands=["addgift"])
 @admin_only
 def addgift_command(message: types.Message):
-    # format: /addgift Назва | Дані подарунка
     try:
         payload = message.text.partition(' ')[2]
         name, sep, data = payload.partition('|')
@@ -281,7 +243,6 @@ def addgift_command(message: types.Message):
         logging.exception("addgift err: %s", e)
         bot.reply_to(message, "Помилка при додаванні")
 
-
 @bot.message_handler(commands=["setcooldown"])
 @admin_only
 def setcooldown_command(message: types.Message):
@@ -293,19 +254,14 @@ def setcooldown_command(message: types.Message):
     except Exception:
         bot.reply_to(message, "Використання: /setcooldown <годин>")
 
-
-# -------------------- FALLBACK / TEXT HANDLER --------------------
 @bot.message_handler(func=lambda m: True)
 def any_message(m: types.Message):
-    # Simple echo/help
     text = (
         "Я бот-клон. Кнопки: /start.\n"
         "Якщо ви адміністратор — використовуйте /stats /broadcast /addgift"
     )
     bot.send_message(m.chat.id, text)
 
-
-# -------------------- RUN --------------------
 if __name__ == '__main__':
     logging.info("Bot started")
     try:
@@ -314,4 +270,3 @@ if __name__ == '__main__':
         logging.info("Bot stopped by keyboard")
     except Exception as e:
         logging.exception("Bot crashed: %s", e)
-
